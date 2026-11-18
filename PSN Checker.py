@@ -4,9 +4,11 @@
 نصب:
     pip install playwright
     playwright install chromium
+    (در لینوکس) sudo apt install python3-tk
 
 اجرا:
-    python app.py
+    python "PSN Checker.py"
+    (ویندوز) یا دابلکلیک روی start.bat
 """
 
 import json
@@ -15,12 +17,21 @@ import random
 import re
 import threading
 import time
-import tkinter as tk
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-from playwright.sync_api import sync_playwright
+try:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, scrolledtext, ttk
+    from playwright.sync_api import sync_playwright
+except ImportError as e:
+    raise SystemExit(
+        f"وابستگی پیدا نشد: {e.name}\n"
+        "نصب:\n"
+        "  pip install playwright\n"
+        "  playwright install chromium\n"
+        "  (لینوکس) sudo apt install python3-tk\n"
+    ) from e
 
 CONFIG_FILE = Path("config.json")
 GOOD_FILE = Path("good.txt")
@@ -225,7 +236,7 @@ def fetch_fingerprint(api_url: str, api_key: str):
 
 
 class FingerprintPool:
-    def init(self):
+    def __init__(self):
         self.lock = threading.Lock()
         self.fp = random_fingerprint()
         self.version = 0
@@ -263,7 +274,7 @@ class FingerprintPool:
 
 # ------------------------------------------------------------- اپ
 class App:
-    def init(self, root):
+    def __init__(self, root):
         self.root = root
         root.title("چکر اکانت")
         root.geometry("820x680")
@@ -272,6 +283,7 @@ class App:
         self.stop_flag = threading.Event()
         self.lock = threading.Lock()
         self.running = False
+        self.active_workers = 0
         self.pool = FingerprintPool()
         self.proxies = []
         self.queue_items = queue.Queue()
@@ -447,11 +459,19 @@ class App:
     def start(self):
         if self.running:
             return
+        try:
+            fp_every = max(0, int(self.spn_fp.get() or 0))
+            conc = max(1, min(20, int(self.spn_conc.get() or 1)))
+        except ValueError:
+            messagebox.showerror("تنظیمات", "تعداد همزمانی و تغییر فینگرپرینت باید عدد باشند.")
+            return
         url = self.ent_url.get().strip()
         combo = self.ent_combo.get().strip()
         if not url or not combo:
             messagebox.showwarning("ناقص", "لینک و فایل کمبو لازم‌اند.")
             return
+        if not re.match(r"^https?://", url, re.I):
+            url = "https://" + url
         if not Path(combo).exists():
             messagebox.showerror("فایل", "فایل کمبو پیدا نشد.")
             return
@@ -466,8 +486,7 @@ class App:
             return
 
         self.proxies = parse_proxies(self.txt_proxy.get("1.0", "end"))
-        self.pool.configure(int(self.spn_fp.get() or 0),
-                            self.ent_fpapi.get(), self.ent_fpkey.get())
+        self.pool.configure(fp_every, self.ent_fpapi.get(), self.ent_fpkey.get())
 
         self.total, self.done = len(items), 0
         self.good = self.bad = self.unknown = 0
@@ -482,9 +501,10 @@ class App:
         self.btn_stop.configure(state="normal")
         self.lbl_status.configure(text="در حال اجرا")
         self.refresh_stats()
-        self.log(f"شروع: {self.total} کمبو | {self.spn_conc.get()} همزمان")
+        self.log(f"شروع: {self.total} کمبو | {conc} همزمان")
 
-        conc = max(1, int(self.spn_conc.get() or 1))
+        with self.lock:
+            self.active_workers = conc
         for i in range(conc):
             threading.Thread(target=self.worker, args=(i + 1, url), daemon=True).start()
 
@@ -546,6 +566,8 @@ class App:
         except Exception as e:
             self.events.put(("log", f"[{wid}] خطا: {e}"))
         finally:
+            with self.lock:
+                self.active_workers -= 1
             self.events.put(("thread_done", None))
 
     def make_context(self, browser, fp):
@@ -601,8 +623,9 @@ class App:
         self.root.after(150, self.pump)
 
     def threads_done(self):
-        active = sum(1 for t in threading.enumerate() if t.name.startswith("Thread-") and t.is_alive())
-        if self.running and self.queue_items.empty() and active <= 1:
+        with self.lock:
+            active = self.active_workers
+        if self.running and self.queue_items.empty() and active == 0:
             self.running = False
             self.btn_start.configure(state="normal")
             self.btn_stop.configure(state="disabled")
@@ -631,12 +654,19 @@ class App:
         path.touch(exist_ok=True)
         try:
             import os
-            os.startfile(path)
+            import subprocess
+            import sys
+            if sys.platform == "win32":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(path)])
+            else:
+                subprocess.Popen(["xdg-open", str(path)])
         except Exception:
             messagebox.showinfo("مسیر", str(path.resolve()))
 
 
-if name == "main":
+if __name__ == "__main__":
     root = tk.Tk()
     App(root)
     root.mainloop()
