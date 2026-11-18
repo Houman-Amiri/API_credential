@@ -1,5 +1,3 @@
-"""
-چکر اکانت با رابط گرافیکی.
 
 نصب:
     pip install playwright
@@ -7,7 +5,7 @@
     (در لینوکس) sudo apt install python3-tk
 
 اجرا:
-    python "PSN Checker.py"
+    python "Checker.py"
     (ویندوز) یا دابلکلیک روی start.bat
 """
 
