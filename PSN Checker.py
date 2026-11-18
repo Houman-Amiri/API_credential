@@ -12,9 +12,11 @@
 """
 
 import json
+import os
 import queue
 import random
 import re
+import sys
 import threading
 import time
 from datetime import datetime
@@ -37,6 +39,90 @@ CONFIG_FILE = Path("config.json")
 GOOD_FILE = Path("good.txt")
 BAD_FILE = Path("bad.txt")
 UNKNOWN_FILE = Path("unknown.txt")
+
+# ---- انتخاب مرورگر ----------------------------------------------------------
+# Playwright Chromium بهطور پیشفرض استفاده میشود؛ اگر دانلود آن در دسترس نبود
+# (مثلاً محدودیت جغرافیایی)، همان Chrome یا Edge نصبشده روی سیستم اجرا میشود.
+# با متغیر محیطی PSN_BROWSER میتوان انتخاب را اجبار کرد: auto | chromium | chrome | edge
+BROWSER_ENV = "PSN_BROWSER"
+
+_BROWSER_KW = None
+
+
+def _system_browsers():
+    """مسیر Chrome/Edge نصبشده روی سیستم، به ترتیب اولویت."""
+    found = []
+    if sys.platform == "win32":
+        roots = [os.environ.get(k) for k in
+                 ("LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432")]
+        rels = (r"Google\Chrome\Application\chrome.exe", r"Microsoft\Edge\Application\msedge.exe")
+        for root in roots:
+            if not root:
+                continue
+            for rel in rels:
+                path = Path(root) / rel
+                if path.is_file() and str(path) not in found:
+                    found.append(str(path))
+    elif sys.platform == "darwin":
+        for path in ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                     "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"):
+            if Path(path).is_file():
+                found.append(path)
+    return found
+
+
+def _launch_candidates(bundled_ok):
+    """گزینههای اجرای مرورگر، به ترتیب امتحان."""
+    want = os.environ.get(BROWSER_ENV, "auto").strip().lower()
+    system = _system_browsers()
+    by_exe = [(f"{Path(p).name} نصبشده", {"executable_path": p}) for p in system]
+
+    if want in ("chrome", "chrome-beta"):
+        return [("Google Chrome نصبشده", {"channel": "chrome"})] + by_exe
+    if want in ("edge", "msedge"):
+        return [("Microsoft Edge نصبشده", {"channel": "msedge"})] + by_exe
+    if want == "chromium":
+        return [("Chromium پلیورایت", {})] + by_exe
+    options = []
+    if bundled_ok:
+        options.append(("Chromium پلیورایت", {}))
+    options.append(("Google Chrome نصبشده", {"channel": "chrome"}))
+    options.append(("Microsoft Edge نصبشده", {"channel": "msedge"}))
+    return options + by_exe
+
+
+def launch_browser(p):
+    """اجرای یک مرورگر Chromium؛ اولین گزینهای که کار کند به خاطر سپرده میشود."""
+    global _BROWSER_KW
+    common = dict(headless=True,
+                  args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
+                  ignore_default_args=["--enable-automation"])
+    cached = _BROWSER_KW
+    if cached is not None:
+        try:
+            return p.chromium.launch(**common, **cached)
+        except Exception:
+            _BROWSER_KW = None      # وضعیت عوض شده؛ دوباره بررسی کن
+            cached = None
+
+    try:
+        bundled_ok = Path(p.chromium.executable_path).is_file()
+    except Exception:
+        bundled_ok = False
+    errors = []
+    for name, kw in _launch_candidates(bundled_ok):
+        try:
+            browser = p.chromium.launch(**common, **kw)
+        except Exception as exc:
+            errors.append(f"{name}: {str(exc).splitlines()[0]}")
+            continue
+        _BROWSER_KW = kw
+        return browser
+    raise RuntimeError(
+        "هیچ مرورگری اجرا نشد. Chromium پلیورایت دانلود نشده و Chrome/Edge هم پیدا نشد.\n"
+        "  python -m playwright install chromium\n"
+        + "  | ".join(errors[:3])
+    )
 
 EMAIL_SEL = ["#signinId", "input[name=signinId]", "input[autocomplete=username]",
              "#email", "input[type=email]", "input[name*=email i]", "input[type=text]"]
@@ -515,11 +601,7 @@ class App:
     def worker(self, wid, url):
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(
-                    headless=True,
-                    args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
-                    ignore_default_args=["--enable-automation"],
-                )
+                browser = launch_browser(p)
                 ctx = None
                 ctx_version = -1
                 try:
