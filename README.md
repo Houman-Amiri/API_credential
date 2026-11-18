@@ -31,6 +31,25 @@ The first run needs an internet connection (Chromium is ~150 MB); later runs
 start immediately. Everything is kept inside this folder (`.venv/`) and is
 git-ignored.
 
+### If the browser download is blocked
+
+Playwright's CDN refuses some regions
+(`Access denied … not available in your location`). The launcher handles this
+by itself:
+
+1. It retries the download from public mirrors.
+2. If that also fails, it uses the **Google Chrome or Microsoft Edge already
+   installed on the PC** — nothing is downloaded, and the app drives that
+   browser instead. The choice is remembered in `.browser_blocked`, so later
+   launches skip the failing download entirely (delete that file to retry).
+
+You can also force a browser with the `PSN_BROWSER` environment variable:
+
+```bat
+set PSN_BROWSER=edge      :: or chrome / chromium / auto (default)
+python "PSN Checker.py"
+```
+
 ## Run (manual)
 
 The filename contains a space, so it must be quoted:
