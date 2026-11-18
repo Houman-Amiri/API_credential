@@ -1,9 +1,4 @@
 # API_credential
-
-`PSN Checker.py` is a Tkinter GUI that drives headless Chromium via Playwright to
-test email/password pairs against a login page. Use it only on accounts and
-systems you own or are explicitly authorised to test.
-
 ## Requirements
 
 - Python 3.9+
