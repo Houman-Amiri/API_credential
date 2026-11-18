@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.venv/
+
+# Runtime output / local config (may contain credentials and API keys)
+config.json
+good.txt
+bad.txt
+unknown.txt
